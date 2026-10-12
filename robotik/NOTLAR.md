@@ -42,5 +42,13 @@ GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, ki�
   - README'de adı geçen `analiz.py` ve `uret_sitl_log.py` klasörde yok
 - Okunamayan Samsung Notes dosyaları: `Robotics project_2026-09-30.note`, `Ders Programı_2026-09-25.note`
 
+## Gövde
+- Şartlar: **ücretsiz**, **organik tasarım**, 3D baskı, 5 inç
+- Beğenilen aday: [3D Printable 5-inch Drone Frame – PecaJosef (MakerWorld 411258)](https://makerworld.com/en/models/411258-3d-printable-5-inch-drone-frame)
+  - Ücretsiz, "generative design" etiketli
+  - SLS için tasarlanmış, FDM'de de basılabiliyor
+  - İlandaki profil: 0,2 mm katman, 3 duvar, %60 gyroid, PLA'da yaklaşık 6,7 saat / 127 g
+- Beğenilmeyenler: Aether 4, Grasshopper5, katlanır modüler 5", Elecrow ModuFrame-5, Drone Frame V1 ve Cults3D/Printables/Thingiverse/Thangs'tan önerilen diğer 9 aday
+
 ## Açık konular
-- Gövde seçimi/tasarımı (organik, baskı, 5 inç)
+- Gövde seçimi kesinleşmedi
