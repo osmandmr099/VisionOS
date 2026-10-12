@@ -53,7 +53,10 @@ GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, ki�
   - İlana göre uzatılmış 16×16 motor yuvaları var, FC yuvası 2 adet 30,5×30,5
   - Yorumlarda PLA, ASA ve PA6-GF ile basıldığı yazıyor
   - AIO'muz 25,5×25,5 olduğu için FC yuvası uymuyor; adaptör ya da yuva değişikliği gerekiyor
+  - Lisans (srhzrl sayfası): dosyaların ve türev çalışmaların (remix dahil) paylaşılması/dağıtılması yasak
   - Kullanıcı kararı bekleniyor
+- Proje **ticari amaçlı değil**
+- Aether ailesinin diğer sürümleri: orijinal BM Aether 4 (4–4,5"), Aether 2.5/3 (hashi), Thingiverse "aether 4" (sdamir2, O4 Pro revizyonu), ayrıca alıcı/GPS adaptörleri (madcatcad, user_1936875010)
 - Beğenilmeyenler: Aether 4, Grasshopper5, katlanır modüler 5", Elecrow ModuFrame-5, Drone Frame V1 ve Cults3D/Printables/Thingiverse/Thangs'tan önerilen diğer 9 aday
 
 ## Açık konular
