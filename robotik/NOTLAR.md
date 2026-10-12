@@ -48,6 +48,12 @@ GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, ki�
   - Ücretsiz, "generative design" etiketli
   - SLS için tasarlanmış, FDM'de de basılabiliyor
   - İlandaki profil: 0,2 mm katman, 3 duvar, %60 gyroid, PLA'da yaklaşık 6,7 saat / 127 g
+- Aether 4'ün 5 inç sürümü bulundu: [BM Aether 4 XL – srhzrl (MakerWorld 593258)](https://makerworld.com/en/models/593258-bm-aether-4-xl-the-5-6-inch-fpv-drone-frame)
+  - Ücretsiz, 5–6 inç, BM Aether 4'ün remix'i
+  - İlana göre uzatılmış 16×16 motor yuvaları var, FC yuvası 2 adet 30,5×30,5
+  - Yorumlarda PLA, ASA ve PA6-GF ile basıldığı yazıyor
+  - AIO'muz 25,5×25,5 olduğu için FC yuvası uymuyor; adaptör ya da yuva değişikliği gerekiyor
+  - Kullanıcı kararı bekleniyor
 - Beğenilmeyenler: Aether 4, Grasshopper5, katlanır modüler 5", Elecrow ModuFrame-5, Drone Frame V1 ve Cults3D/Printables/Thingiverse/Thangs'tan önerilen diğer 9 aday
 
 ## Açık konular
