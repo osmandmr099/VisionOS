@@ -2,6 +2,7 @@
 
 > Bu dosyada yalnızca kullanıcının teyit ettiği bilgiler bulunur.
 > Claude'un analiz ve önerileri, onaylanana kadar buraya "karar" olarak yazılmaz.
+> Kullanıcı tahmin istemiyor: yalnızca kaynaklı bilgi verilecek, bilinmeyen değerler "ölçülmeli" diye belirtilecek.
 
 ## Projenin amacı
 GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, kişiye göre konum alan bir otonom drone:
@@ -21,15 +22,18 @@ GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, ki�
 | Raspberry Pi 5 4GB | Görev bilgisayarı. **USB-C'den** beslenecek |
 | Pi Camera Module 3 Wide | Otonomi (algılama) için |
 | Mini560 + soğutucu blok | Pi5 için 5 V düşürücü |
-| VL53L0X × 5 | **Çevre** (engel) algılama için, yükseklik için değil. L1X'e gerek görülmedi |
+| VL53L0X × 5 | **Çevre** algılama için: ön (kamerayla aynı hizada), arka, sol, sağ, yukarı. Yükseklik için kullanılmayacak, L1X'e gerek görülmedi |
 | TCA9548A | VL53L0X'ler için I2C çoklayıcı |
 | MicoAir MTF-02P | Optik akış + aşağı bakan lidar (yükseklik) |
 | Gövde | 3D baskı, **organik tasarım** tercih ediliyor. Karbon gövde **mümkün değil** |
+| (Opsiyonel) Raspberry Pi AI HAT+ 13 TOPS | Gerekirse eklenecek |
 
 ## Kısıtlar ve kararlar (teyitli)
 - Kumanda/alıcı **yok**
 - Pusula **yok**
-- GPS **yok**
+- GPS **yok**. Tasarım GPS'siz yapılacak
+- Nesne takip algoritmaları (ör. ByteTrack) **kullanılmayacak**
+- Yere optik akış (MTF-02P) bakıyor
 - Kablolar, montaj malzemesi, şarj cihazı gibi yardımcı parçalar mevcut. Bunlar için öneri yapmaya gerek yok.
 
 ## Drive kaynakları
