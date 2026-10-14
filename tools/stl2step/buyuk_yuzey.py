@@ -480,8 +480,15 @@ def donustur(m, sinif, orijinal, keskin_aci=30.0, hedef_alan=400.0, koni=70.0,
         if not mf.IsDone():
             ozet["yuz_kurulamadi"] += 1
             continue
-        sf = ShapeFix_Face(mf.Face())
-        sf.Perform()
-        yuzler.append(sf.Face())
+        try:
+            sf = ShapeFix_Face(mf.Face())
+            sf.Perform()
+            yuzler.append(sf.Face())
+        except Exception:
+            tur_ = "organik" if r < n_org else ("duzlem" if r in duz_id.values() else "silindir")
+            ozet["onarilamadi_" + tur_] += 1
+            ozet.setdefault("onarilamayan_bolgeler", [])
+            ozet["onarilamayan_bolgeler"].append(r)
+            yuzler.append(mf.Face())
     ozet["uydurma_en_buyuk_hata"] = float(np.max(hatalar)) if hatalar else 0.0
     return yuzler, dict(ozet)
