@@ -520,23 +520,38 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
     duzlem = np.bincount(lab)[lab] >= 2
     serbest = ~duzlem
 
-    # her düz bölge için ortak düzlem; köşeler bu düzlem(ler)e tam oturtulur
-    kisitlar = defaultdict(list)
+    # her düz bölge için ortak düzlem; köşeler bu düzlem(ler)e tam oturtulur.
+    # Köşesi tolerans içinde oturtulamayan bölge tam düz değildir: organik sayılır.
     alan = m.area_faces
+    V0 = V.copy()
+    duzlemler = {}
     for r in np.unique(lab[duzlem]):
         fs = np.where(lab == r)[0]
         n = (FN[fs] * alan[fs][:, None]).sum(0)
         n /= np.linalg.norm(n)
         vs = np.unique(F[fs])
-        d0 = float(np.mean(V[vs] @ n))
-        for v in vs:
-            kisitlar[int(v)].append((n, d0))
-    for v, ks in kisitlar.items():
-        N = np.array([k[0] for k in ks])
-        d = np.array([k[1] for k in ks])
-        kayma = np.linalg.pinv(N, rcond=1e-3) @ (d - N @ V[v])
-        if np.linalg.norm(kayma) < duz_tol * 10:  # yalnız tolerans içindeki köşeleri oturt
-            V[v] = V[v] + kayma
+        duzlemler[int(r)] = (n, float(np.mean(V0[vs] @ n)), vs)
+    for _ in range(5):
+        kisitlar = defaultdict(list)
+        for r, (n, d0, vs) in duzlemler.items():
+            for v in vs:
+                kisitlar[int(v)].append((r, n, d0))
+        V[:] = V0
+        basarisiz = set()
+        for v, ks in kisitlar.items():
+            N = np.array([k[1] for k in ks])
+            d = np.array([k[2] for k in ks])
+            kayma = np.linalg.pinv(N, rcond=1e-3) @ (d - N @ V0[v])
+            if np.linalg.norm(kayma) < duz_tol * 10 and np.abs(N @ (V0[v] + kayma) - d).max() < duz_tol * 1e-3:
+                V[v] = V0[v] + kayma
+            else:
+                basarisiz |= {k[0] for k in ks}
+        if not basarisiz:
+            break
+        for r in basarisiz:
+            duzlemler.pop(r)
+    duzlem = np.isin(lab, list(duzlemler.keys()))
+    serbest = ~duzlem
 
     keskin = {(int(e[0]), int(e[1])) for e, a in zip(ae, ang) if a >= keskin_aci}
     duz_kenar = set(keskin)
