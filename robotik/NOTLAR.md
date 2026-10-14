@@ -72,5 +72,7 @@ GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, ki�
   - Sapma ortalama 0,013 mm, %99'u 0,064 mm'nin altında
 - STEP dosyası lisans nedeniyle repoya konmadı; konuşma üzerinden kullanıcıya gönderildi
 
+- Kullanıcı STEP'i Fusion'da açtı: tek gövde olarak yüklendi, yüzler dörtgen yamalar hâlinde görünüyor (14.10.2026)
+
 ## Açık konular
-- Üretilen STEP'in Fusion'da açılıp düzenlenebilirliğinin kullanıcı tarafından denenmesi
+- STEP üzerinde Pi5 ve AIO yuvaları için düzenleme (kesme/ekleme) işlemlerinin Fusion'da denenmesi
