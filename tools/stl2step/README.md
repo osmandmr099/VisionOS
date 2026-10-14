@@ -1,33 +1,41 @@
 # stl2step
 
-STL dosyasını, üçgen yüz içermeyen, düzgün yüzeyli bir STEP dosyasına çevirir. Çıktı dört kenarlı bikübik B-spline yüzeylerden oluşan geçerli bir katıdır.
+STL dosyasını, üçgen yüz içermeyen düzenlenebilir bir STEP katısına çevirir.
+- Düz bölgeler tek **düzlem** yüz olur.
+- Delikler gerçek **silindir** olarak yeniden kesilir.
+- Organik bölgeler dört kenarlı **bikübik B-spline** yüzlere dönüşür.
 
 ## Kurulum
 ```
 python -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
+Windows'ta `venv/bin/` yerine `venv\Scripts\` kullanılır.
 
 ## Kullanım
 ```
-venv/bin/python stl2step.py girdi.stl cikti.step --sapma
+venv/bin/python stl2step.py girdi.stl cikti.step --olcek 0.1 --hedef-ucgen 40000 --sapma
 ```
 
 | Seçenek | Ne yapar |
 |---|---|
-| `--hedef-ucgen N` | Dönüştürmeden önce ağı N üçgene indirir. Yüz sayısını ve dosya boyutunu düşürür. |
-| `--keskin-aci 30` | Bu açıdan keskin kenarları düz bırakır (delik ağızları, düz yüzeyler). |
-| `--birlestirme` | Düz bölgelerin tek düzlem yüzde birleştirilmesini kapatır. |
-| `--sapma` | Üretilen yüzeyin girdi ağından ne kadar saptığını ölçer. |
+| `--olcek K` | Koordinatları K ile çarpar. 0,1 mm birimli bir STL'yi mm'ye çevirmek için `0.1`. |
+| `--hedef-ucgen N` | Dönüştürmeden önce ağı topolojiyi koruyarak N üçgene indirir. Yüz sayısını ve dosya boyutunu belirleyen ana ayar budur. |
+| `--keskin-aci 30` | Bu açıdan büyük kenarlar keskin kalır. Bölgeler ve delikler bu kenarlarla ayrılır. |
+| `--delik-yok` | Delikleri silindire çevirmez. |
+| `--sapma` | Sonucun girdi ağından iki yönlü sapmasını ölçer. |
 
 ## Yöntem
-1. Her üçgen; köşe, kenar ortası ve merkez noktası kullanılarak 3 dörtgene bölünür. Bütün noktalar orijinal yüzeyin üzerinde kalır.
-2. Kenar eğrileri, uçlardaki normallerden kübik Bézier olarak kurulur (PN kuralı). Komşu yüzler aynı eğriyi paylaştığı için gövde su geçirmezdir.
-3. İç kontrol noktaları ayrık Coons formülüyle bulunur.
-4. Tamamen düz olan dörtgenler düzlem yüz olarak kurulur. Aynı düzlemdeki komşu yüzler tek yüzde birleştirilir.
-5. Yüzler OpenCASCADE ile dikilir, katıya çevrilir ve STEP olarak yazılır.
+1. Ağ onarılır: manifold olmayan küçük kusurlar silinir ve doldurulur.
+2. Keskin kenarlarla çevrili, tam çevreli, içe bakan silindir bölgeleri delik olarak bulunur. Ağdan çıkarılıp tıkanır.
+3. Ağ, topolojisi korunarak indirgenir (pymeshlab quadric edge collapse).
+4. Aynı düzlemdeki komşu üçgenler tek düzlem yüz olur.
+5. Organik üçgenler komşularıyla eşlenip dörtgen olur. Eşleme önce açgözlü yapılır, sonra artırıcı yollarla eşsiz kalanlar azaltılır.
+   - Her kenar, uç normallerinden kurulan tek bir kübik eğridir ve iki yüz tarafından paylaşılır.
+   - Dörtgenin içi ayrık Coons formülüyle doldurulur.
+   - Eşlenemeyen üçgenler 3 dörtgene bölünür.
+6. Yüzler OpenCASCADE ile dikilir ve katıya çevrilir. Delikler gerçek silindirlerle kesilir, STEP (AP214) yazılır.
 
 ## Sınırlar
-- Eğrisel bölgelerde her girdi üçgeni 3 yüz üretir. Bu bölgelerde yüz sayısı fazla olur ve yüzlerin dizilişi orijinal üçgenlemeyi izler.
-- Silindirik delik duvarları tek bir silindir yüze çevrilmez, şeritler hâlinde kalır.
-- Girdi ağı su geçirmez (manifold) olmalıdır.
+- Organik bölgedeki yüz sayısı, indirgenmiş üçgen sayısının yaklaşık yarısı kadardır. Yüzlerin dizilişi üçgenlemeyi izler.
+- Yalnızca keskin kenarla ayrılmış tam delikler silindire çevrilir. Pahlı ya da yuvarlatılmış ağızlı delikler organik kalır.

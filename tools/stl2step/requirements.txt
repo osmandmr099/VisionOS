@@ -3,4 +3,5 @@ trimesh
 numpy
 scipy
 rtree
-fast-simplification
+networkx
+pymeshlab
