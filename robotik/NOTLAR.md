@@ -61,5 +61,16 @@ GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, ki�
 - Aether ailesinin diğer sürümleri: orijinal BM Aether 4 (4–4,5"), Aether 2.5/3 (hashi), Thingiverse "aether 4" (sdamir2, O4 Pro revizyonu), ayrıca alıcı/GPS adaptörleri (madcatcad, user_1936875010)
 - Beğenilmeyenler: Aether 4, Grasshopper5, katlanır modüler 5", Elecrow ModuFrame-5, Drone Frame V1 ve Cults3D/Printables/Thingiverse/Thangs'tan önerilen diğer 9 aday
 
+## STL -> STEP dönüştürücü
+- `tools/stl2step/` (Python, OpenCASCADE). Kullanım ve yöntem için README'ye bakın.
+- Aether 4 XL STL'si: 166.049 üçgen, birimi **0,1 mm** (16×16 motor deseni 160,0 birim ölçüldü)
+- Komut: `stl2step.py govde.stl govde.step --olcek 0.1 --hedef-ucgen 40000 --sapma`
+- Sonuç (14.10.2026):
+  - Tek geçerli katı, 20.604 yüz (1.203 düzlem, 45 silindir, 19.356 B-spline)
+  - 39 deliğin 38'i silindir olarak kuruldu
+  - Hacim farkı %0,2
+  - Sapma ortalama 0,013 mm, %99'u 0,064 mm'nin altında
+- STEP dosyası lisans nedeniyle repoya konmadı; konuşma üzerinden kullanıcıya gönderildi
+
 ## Açık konular
-- Aether 4 XL'i düzenlenebilir (üçgensiz) CAD formatına getirme yöntemi
+- Üretilen STEP'in Fusion'da açılıp düzenlenebilirliğinin kullanıcı tarafından denenmesi
