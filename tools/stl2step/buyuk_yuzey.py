@@ -34,6 +34,8 @@ from OCP.ShapeFix import ShapeFix_Face
 from OCP.TopoDS import TopoDS
 
 _kenar = getattr(TopoDS, "Edge_s", None) or TopoDS.Edge
+_tel = getattr(TopoDS, "Wire_s", None) or TopoDS.Wire
+from OCP.BRepCheck import BRepCheck_Analyzer
 
 try:
     from OCP.TColgp import TColgp_Array1OfPnt, TColgp_Array2OfPnt
@@ -256,7 +258,7 @@ def _bspline_tabani(t, n, a, b, k=3):
     return BSpline.design_matrix(np.clip(t, a, b), dugum, k).tocsr(), ic
 
 
-def yuzey_uydur(P, n, e1, e2, merkez, duzgunluk=1e-4):
+def yuzey_uydur(P, n, e1, e2, merkez, duzgunluk=1e-3, W=None):
     """P noktalarına, (e1, e2) düzlemine izdüşümle parametrelenmiş kübik B-spline yüzey."""
     u = (P - merkez) @ e1
     v = (P - merkez) @ e2
@@ -280,14 +282,15 @@ def yuzey_uydur(P, n, e1, e2, merkez, duzgunluk=1e-4):
     cols = cols.ravel()
     vals = vals.ravel()
     M = sp.csr_matrix((vals, (rows, cols)), shape=(len(P), n * n))
+    Wd = sp.diags(np.ones(len(P)) if W is None else W)
     # ikinci fark düzgünlük terimi
     D1 = sp.diags([1.0, -2.0, 1.0], [0, 1, 2], shape=(n - 2, n))
     I = sp.identity(n)
     R = sp.vstack([sp.kron(D1, I), sp.kron(I, D1)])
     olcek = (M.multiply(M)).sum() / max(R.multiply(R).sum(), 1)
-    A_ = (M.T @ M + duzgunluk * olcek * (R.T @ R)).tocsc()
+    A_ = (M.T @ Wd @ M + duzgunluk * olcek * (R.T @ R)).tocsc()
     cozucu = spla.factorized(A_)
-    Q = np.column_stack([cozucu(M.T @ P[:, k]) for k in range(3)])
+    Q = np.column_stack([cozucu(M.T @ (Wd @ P[:, k])) for k in range(3)])
     hata = np.linalg.norm(M @ Q - P, axis=1)
     return Q.reshape(n, n, 3), (ua, ub, ku), (va, vb, kv), hata
 
@@ -314,8 +317,8 @@ def bspline_yuzey(Q, ku, kv, k=3):
 
 # ----------------------------------------------------------------------------- uçtan uca
 
-def donustur(m, sinif, orijinal, keskin_aci=30.0, hedef_alan=400.0, koni=70.0,
-             yuzey_tol=0.05, kirinti=10, log=print):
+def donustur(m, sinif, orijinal, keskin_aci=30.0, hedef_alan=400.0, koni=45.0,
+             yuzey_tol=0.05, kirinti=0, log=print):
     """sinif: stl2step.siniflandir çıktısı (köşeler düzlem/silindirlere oturtulmuş).
     orijinal: uydurmada kullanılacak tam çözünürlüklü ağ. Yüz listesi ve özet döndürür."""
     from scipy.sparse.csgraph import connected_components
@@ -443,15 +446,28 @@ def donustur(m, sinif, orijinal, keskin_aci=30.0, hedef_alan=400.0, koni=70.0,
             e1 /= np.linalg.norm(e1)
             e2 = np.cross(n, e1)
             vs = np.unique(F[fs])
-            P = np.r_[O[O_bolge == r], V[vs]]
+            # sınır eğrisi örnekleri: yüzey kenara otursun diye yüksek ağırlık
+            sinir_p = []
+            for seq in donguler(r):
+                for pidx, _ in seq:
+                    pts = V[parcalar[pidx]]
+                    for i in range(len(pts) - 1):
+                        for t in (0.0, 0.25, 0.5, 0.75):
+                            sinir_p.append(pts[i] * (1 - t) + pts[i + 1] * t)
+                    sinir_p.append(pts[-1])
+            sinir_p = np.array(sinir_p) if sinir_p else np.zeros((0, 3))
+            ic_p = np.r_[O[O_bolge == r], V[vs]]
+            P = np.r_[ic_p, sinir_p]
+            W = np.r_[np.ones(len(ic_p)), np.full(len(sinir_p), 20.0)]
             merkez = P.mean(0)
             uz = max(np.ptp((P - merkez) @ e1), np.ptp((P - merkez) @ e2))
-            ncp = int(np.clip(uz / 2.0 + 4, 5, 40))
+            ust = int(np.clip(np.sqrt(len(ic_p) / 3.0), 4, 40))
+            ncp = int(np.clip(uz / 2.0 + 4, 4, ust))
             while True:
-                Q, ud, vd, hata = yuzey_uydur(P, ncp, e1, e2, merkez)
-                if hata.max() < yuzey_tol or ncp >= 40:
+                Q, ud, vd, hata = yuzey_uydur(P, ncp, e1, e2, merkez, W=W)
+                if hata.max() < yuzey_tol or ncp >= ust:
                     break
-                ncp = min(40, int(ncp * 1.4) + 1)
+                ncp = min(ust, int(ncp * 1.4) + 1)
             hatalar.append(hata.max())
             yuzey = bspline_yuzey(Q, ud[2], vd[2])
             ozet["organik"] += 1
@@ -474,12 +490,20 @@ def donustur(m, sinif, orijinal, keskin_aci=30.0, hedef_alan=400.0, koni=70.0,
         if not tel:
             ozet["tel_yok"] += 1
             continue
-        mf = BRepBuilderAPI_MakeFace(yuzey, tel[0], True)
-        for w in tel[1:]:
-            mf.Add(w)
+        def kur(teller):
+            mf_ = BRepBuilderAPI_MakeFace(yuzey, teller[0], True)
+            for w in teller[1:]:
+                mf_.Add(w)
+            return mf_
+        mf = kur(tel)
         if not mf.IsDone():
             ozet["yuz_kurulamadi"] += 1
             continue
+        if not BRepCheck_Analyzer(mf.Face()).IsValid():
+            ters = kur([_tel(w.Reversed()) for w in tel])
+            if ters.IsDone() and BRepCheck_Analyzer(ters.Face()).IsValid():
+                mf = ters
+                ozet["ters_tel"] += 1
         try:
             sf = ShapeFix_Face(mf.Face())
             sf.Perform()
