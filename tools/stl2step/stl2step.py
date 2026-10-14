@@ -738,6 +738,8 @@ def main():
     ap.add_argument("--keskin-aci", type=float, default=30.0,
                     help="Bu açıdan (derece) büyük kenarlar keskin kalır")
     ap.add_argument("--delik-yok", action="store_true", help="Delikleri silindire çevirme")
+    ap.add_argument("--toplu-kes", action="store_true",
+                    help="Delikleri tek boolean işlemiyle kes (büyük modellerde çok yavaş olabilir)")
     ap.add_argument("--sapma", action="store_true", help="Sonucun girdi ağından sapmasını ölç")
     a = ap.parse_args()
 
@@ -844,18 +846,22 @@ def main():
                 return None
             return k.Shape()
 
-        sonuc = kes(kati, silindirler)
+        sonuc = kes(kati, silindirler) if a.toplu_kes else None
         if sonuc is not None:
             kati = sonuc
             log(f"Delikler kesildi: {len(silindirler)}/{len(silindirler)} ({time.time() - t0:.0f} sn)")
         else:
-            log("  toplu kesim geçersiz sonuç verdi, delikler tek tek kesiliyor")
+            if a.toplu_kes:
+                log("  toplu kesim geçersiz sonuç verdi, delikler tek tek kesiliyor")
             basarili = 0
-            for t in silindirler:
+            for i, t in enumerate(silindirler):
                 sonuc = kes(kati, [t])
                 if sonuc is not None:
                     kati = sonuc
                     basarili += 1
+                else:
+                    log(f"  UYARI: {i + 1}. delik kesilemedi, tıkalı bırakıldı")
+                log(f"  delik {i + 1}/{len(silindirler)} ({time.time() - t0:.0f} sn)")
             log(f"Delikler kesildi: {basarili}/{len(silindirler)} ({time.time() - t0:.0f} sn)")
         birlestir = ShapeUpgrade_UnifySameDomain(kati, True, True, True)
         birlestir.Build()
