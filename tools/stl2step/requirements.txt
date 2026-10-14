@@ -1,0 +1,6 @@
+cadquery-ocp
+trimesh
+numpy
+scipy
+rtree
+fast-simplification
