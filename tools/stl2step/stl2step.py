@@ -25,6 +25,7 @@ from OCP.BRep import BRep_Builder
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeFace,
+    BRepBuilderAPI_MakePolygon,
     BRepBuilderAPI_MakeSolid,
     BRepBuilderAPI_Sewing,
 )
@@ -37,12 +38,13 @@ from OCP.gp import gp_Pnt
 from OCP.IFSelect import IFSelect_RetDone
 from OCP.Interface import Interface_Static
 from OCP.ShapeFix import ShapeFix_Solid
+from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
 from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
 try:
     from OCP.TColgp import TColgp_Array2OfPnt
 except ImportError:  # OCCT 8
     from OCP.OCP.collections import Array2_gp_Pnt as TColgp_Array2OfPnt
-from OCP.TopAbs import TopAbs_FACE, TopAbs_SHELL
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
@@ -164,6 +166,26 @@ def bezier_ag(p, n, duz):
     return b
 
 
+def duzlemsel_mi(b, n, tol):
+    """16 kontrol noktası tek düzlemde ve 4 kenar düz çizgi mi?"""
+    pts = np.array([b[i][j] for i in range(4) for j in range(4)])
+    if np.abs((pts - pts[0]) @ n).max() > tol:
+        return False
+    for kenar in ([b[i][0] for i in range(4)], [b[i][3] for i in range(4)],
+                  [b[0][j] for j in range(4)], [b[3][j] for j in range(4)]):
+        a, c = kenar[0], kenar[3]
+        t = c - a
+        L = np.linalg.norm(t)
+        if L == 0:
+            return False
+        t = t / L
+        for p in kenar[1:3]:
+            r = p - a
+            if np.linalg.norm(r - (r @ t) * t) > tol:
+                return False
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("girdi")
@@ -173,6 +195,8 @@ def main():
     ap.add_argument("--keskin-aci", type=float, default=30.0,
                     help="Bu açıdan (derece) keskin kenarlar düz bırakılır")
     ap.add_argument("--tolerans", type=float, default=1e-4, help="Dikiş toleransı (mm)")
+    ap.add_argument("--birlestirme", action="store_true",
+                    help="Düz bölgeleri tek düzlem yüzde birleştirmeyi KAPAT")
     ap.add_argument("--sapma", action="store_true",
                     help="Yüzeylerden örnek alıp girdi ağına uzaklığı ölç")
     a = ap.parse_args()
@@ -208,6 +232,14 @@ def main():
         for i in range(4):
             for j in range(4):
                 arr.SetValue(i + 1, j + 1, gp_Pnt(*map(float, b[i][j])))
+        if not a.birlestirme and duzlemsel_mi(b, QN[qi], a.tolerans * 0.1):
+            poli = BRepBuilderAPI_MakePolygon(*[gp_Pnt(*map(float, x)) for x in p], True)
+            dikis.Add(BRepBuilderAPI_MakeFace(poli.Wire(), True).Face())
+            if ornek is not None:
+                for u in (0.25, 0.5, 0.75):
+                    for v in (0.25, 0.5, 0.75):
+                        ornek.append((1-u)*(1-v)*p[0] + u*(1-v)*p[1] + u*v*p[2] + (1-u)*v*p[3])
+            continue
         yuzey = Geom_BezierSurface(arr)
         if ornek is not None:
             for u in (0.25, 0.5, 0.75):
@@ -228,16 +260,28 @@ def main():
     duzelt = ShapeFix_Solid(yapici.Solid())
     duzelt.Perform()
     kati = duzelt.Solid()
+    if not a.birlestirme:
+        birlestir = ShapeUpgrade_UnifySameDomain(kati, True, True, True)
+        birlestir.Build()
+        kati = birlestir.Shape()
 
     gecerli = BRepCheck_Analyzer(kati).IsValid()
     props = GProp_GProps()
     BRepGProp.VolumeProperties_s(kati, props)
-    yuz = duzlem = 0
+    yuz = duzlem = ucgen = 0
     exp = TopExp_Explorer(kati, TopAbs_FACE)
     while exp.More():
+        f = _face(exp.Current())
         yuz += 1
-        if BRepAdaptor_Surface(_face(exp.Current())).GetType() == GeomAbs_Plane:
+        if BRepAdaptor_Surface(f).GetType() == GeomAbs_Plane:
             duzlem += 1
+            kenar_say = 0
+            e2 = TopExp_Explorer(f, TopAbs_EDGE)
+            while e2.More():
+                kenar_say += 1
+                e2.Next()
+            if kenar_say == 3:
+                ucgen += 1
         exp.Next()
 
     Interface_Static.SetCVal_s("write.step.schema", "AP214")
@@ -246,7 +290,8 @@ def main():
     if w.Write(a.cikti) != IFSelect_RetDone:
         sys.exit("HATA: STEP yazılamadı")
 
-    print(f"Kabuk: {kabuk_sayisi}, yüz: {yuz}, düzlemsel üçgen yüz: {duzlem}, geçerli katı: {gecerli}")
+    print(f"Kabuk: {kabuk_sayisi}, yüz: {yuz} (düzlem: {duzlem}, eğrisel: {yuz - duzlem}), "
+          f"3 kenarlı yüz: {ucgen}, geçerli katı: {gecerli}")
     print(f"Hacim: STEP={abs(props.Mass()):.3f}  ağ={m.volume:.3f}  "
           f"fark=%{100 * abs(abs(props.Mass()) - m.volume) / m.volume:.3f}")
     if ornek:
