@@ -28,24 +28,24 @@ from scipy.sparse.csgraph import connected_components
 
 from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Surface
-from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
 from OCP.BRepBuilderAPI import (
+    BRepBuilderAPI_MakeEdge,
     BRepBuilderAPI_MakeFace,
     BRepBuilderAPI_MakePolygon,
+    BRepBuilderAPI_MakeWire,
     BRepBuilderAPI_MakeSolid,
     BRepBuilderAPI_Sewing,
 )
 from OCP.BRepCheck import BRepCheck_Analyzer
 from OCP.BRepGProp import BRepGProp
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
-from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
-from OCP.Geom import Geom_BezierSurface
+from OCP.Geom import Geom_BezierCurve, Geom_BezierSurface, Geom_CylindricalSurface
 from OCP.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane
 from OCP.GProp import GProp_GProps
-from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+from OCP.gp import gp_Ax3, gp_Dir, gp_Pnt
 from OCP.IFSelect import IFSelect_RetDone
 from OCP.Interface import Interface_Static
-from OCP.ShapeFix import ShapeFix_Solid
+from OCP.ShapeFix import ShapeFix_Face, ShapeFix_Solid
 from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
 from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID
@@ -54,9 +54,10 @@ from OCP.TopLoc import TopLoc_Location
 from OCP.TopoDS import TopoDS
 
 try:
-    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TColgp import TColgp_Array1OfPnt, TColgp_Array2OfPnt
     from OCP.TopTools import TopTools_ListOfShape
 except ImportError:  # OCCT 8
+    from OCP.OCP.collections import Array1_gp_Pnt as TColgp_Array1OfPnt
     from OCP.OCP.collections import Array2_gp_Pnt as TColgp_Array2OfPnt
     from OCP.OCP.collections import List_TopoDS_Shape as TopTools_ListOfShape
 
@@ -178,45 +179,36 @@ def delik_bul(m, keskin_aci):
         bosluk = np.degrees(np.max(np.r_[np.diff(th), th[0] + 2 * np.pi - th[-1]]))
         ice = np.mean((C[idx] @ u - c[0]) * (n @ u) + (C[idx] @ v - c[1]) * (n @ v)) < 0
         if hata < 0.03 * R and ice and bosluk < 30:
-            delikler.append(dict(yuz=idx, R=R, eksen=ax, nokta=c[0] * u + c[1] * v))
+            p0 = c[0] * u + c[1] * v
+            t = (pts - p0) @ ax
+            delikler.append(dict(yuz=idx, R=R, eksen=ax, nokta=p0, tmin=t.min(), tmax=t.max()))
     return delikler
 
 
-def delikleri_tika(m, delikler):
-    """Delik duvarlarını siler, açılan döngüleri kapatır, kesilecek silindirleri döndürür."""
-    nv = len(m.vertices)
-    _, k = kenar_anahtari(m.faces, nv)
-    fid = np.tile(np.arange(len(m.faces)), 3)
-    kenar_yuz = defaultdict(list)
-    for kk, f in zip(k.tolist(), fid.tolist()):
-        kenar_yuz[kk].append(f)
-    sil = np.zeros(len(m.faces), bool)
-    araclar = []
-    for d in delikler:
-        sil[d["yuz"]] = True
+def duvar_bul(m, delikler, tol):
+    """İndirgenmiş ağda her deliğin duvar üçgenlerini bulur: üç köşesi de silindir yüzeyinde,
+    normali eksene dik ve eksene doğru bakan üçgenler."""
+    F = np.asarray(m.faces)
+    V = np.asarray(m.vertices)
+    FN = m.face_normals
+    C = m.triangles_center
+    duvar = -np.ones(len(F), int)
+    for i, d in enumerate(delikler):
         ax, p0, R = d["eksen"], d["nokta"], d["R"]
-        bolge = set(d["yuz"].tolist())
-        t = (m.vertices[np.unique(m.faces[d["yuz"]])] - p0) @ ax
-        tmin, tmax = t.min(), t.max()
-        acik = {"alt": True, "ust": True}
-        _, kd = kenar_anahtari(m.faces[d["yuz"]], nv)
-        for kk in set(kd.tolist()):
-            dis = [f for f in kenar_yuz[kk] if f not in bolge]
-            if len(dis) != 1:
-                continue
-            r = m.triangles_center[dis[0]] - p0
-            if np.linalg.norm(r - (r @ ax) * ax) < R * 0.98:  # komşu yüz delik izdüşümünde: taban
-                a, b = divmod(kk, nv)
-                tk = ((m.vertices[a] + m.vertices[b]) / 2 - p0) @ ax
-                acik["alt" if tk < (tmin + tmax) / 2 else "ust"] = False
+        r = V - p0
+        t = r @ ax
+        uzak = np.linalg.norm(r - np.outer(t, ax), axis=1)
         pay = 0.05 * R
-        t0 = tmin - (pay if acik["alt"] else 0.0)
-        t1 = tmax + (pay if acik["ust"] else 0.0)
-        araclar.append((p0 + t0 * ax, ax, R, t1 - t0))
-    V, F = donguleri_doldur(np.asarray(m.vertices), np.asarray(m.faces[~sil]))
-    m2 = trimesh.Trimesh(V, F, process=True)
-    m2.remove_unreferenced_vertices()
-    return m2, araclar
+        vok = (np.abs(uzak - R) < max(0.03 * R, 5 * tol)) & (t > d["tmin"] - pay) & (t < d["tmax"] + pay)
+        idx = np.where(vok[F].all(1) & (duvar < 0))[0]
+        if not len(idx):
+            continue
+        rc = C[idx] - p0
+        rr = rc - np.outer(rc @ ax, ax)
+        rr /= np.linalg.norm(rr, axis=1, keepdims=True)
+        ok = (np.abs(FN[idx] @ ax) < 0.3) & (np.einsum("ij,ij->i", FN[idx], rr) < -0.7)
+        duvar[idx[ok]] = i
+    return duvar
 
 
 # ----------------------------------------------------------------------------- indirgeme
@@ -501,7 +493,38 @@ def esle(m, serbest, yasak_kenar):
     return es
 
 
-def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
+def kenar_ocp(c):
+    """Kübik kontrol noktalarından OCC kenarı: düzse doğru parçası, değilse Bézier eğrisi."""
+    t = c[3] - c[0]
+    L = np.linalg.norm(t)
+    if L > 0:
+        u = t / L
+        sapma = max(np.linalg.norm((c[k] - c[0]) - ((c[k] - c[0]) @ u) * u) for k in (1, 2))
+        if sapma < 1e-9 * max(L, 1.0):
+            return BRepBuilderAPI_MakeEdge(gp_Pnt(*map(float, c[0])), gp_Pnt(*map(float, c[3]))).Edge()
+    arr = TColgp_Array1OfPnt(1, 4)
+    for k in range(4):
+        arr.SetValue(k + 1, gp_Pnt(*map(float, c[k])))
+    return BRepBuilderAPI_MakeEdge(Geom_BezierCurve(arr)).Edge()
+
+
+def agiz_kontrol(Pa, Nwa, Nna, Pb, Nwb, Nnb):
+    """Delik ağzı kenarı: uçlardaki teğet, silindir ile komşu yüzeyin kesişim doğrultusu."""
+    c = Pb - Pa
+    L = np.linalg.norm(c)
+    ts = []
+    for Nw, Nn in ((Nwa, Nna), (Nwb, Nnb)):
+        t = np.cross(Nn, Nw)
+        if np.linalg.norm(t) < 1e-6:
+            t = c - (c @ Nw) * Nw
+        t /= np.linalg.norm(t)
+        if t @ c < 0:
+            t = -t
+        ts.append(t)
+    return np.array([Pa, Pa + ts[0] * L / 3, Pb - ts[1] * L / 3, Pb])
+
+
+def yuzleri_kur(m, keskin_aci, duz_tol, delikler=(), duz_aci=0.25):
     V = np.array(m.vertices, float)
     F = np.asarray(m.faces)
     FN = m.face_normals
@@ -509,20 +532,26 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
     adj = m.face_adjacency
     ae = np.sort(m.face_adjacency_edges, 1)
     ang = np.degrees(m.face_adjacency_angles)
+    alan = m.area_faces
+
+    duvar = duvar_bul(m, delikler, duz_tol) if len(delikler) else -np.ones(nf, int)
+    silindirler = {}
+    for i, d in enumerate(delikler):
+        if (duvar == i).any():
+            silindirler[i] = Geom_CylindricalSurface(
+                gp_Ax3(gp_Pnt(*map(float, d["nokta"])), gp_Dir(*map(float, d["eksen"]))), float(d["R"]))
 
     # düz bölgeler: neredeyse aynı normalli ve aynı düzlemdeki komşu üçgenler (en az 2 üçgen)
     benzer = ang < duz_aci
     benzer &= np.abs(np.einsum("ij,ij->i", V[F[adj[:, 0]][:, 0]] - V[F[adj[:, 1]][:, 0]],
                                FN[adj[:, 1]])) < duz_tol
+    benzer &= (duvar[adj[:, 0]] < 0) & (duvar[adj[:, 1]] < 0)
     _, lab = connected_components(
         coo_matrix((np.ones(benzer.sum()), (adj[benzer, 0], adj[benzer, 1])), shape=(nf, nf)),
         directed=False)
-    duzlem = np.bincount(lab)[lab] >= 2
-    serbest = ~duzlem
+    duzlem = (np.bincount(lab)[lab] >= 2) & (duvar < 0)
 
-    # her düz bölge için ortak düzlem; köşeler bu düzlem(ler)e tam oturtulur.
-    # Köşesi tolerans içinde oturtulamayan bölge tam düz değildir: organik sayılır.
-    alan = m.area_faces
+    # köşeleri düzlemlerine ve silindirlerine tam oturt. Oturtulamayan düz bölge organik sayılır.
     V0 = V.copy()
     duzlemler = {}
     for r in np.unique(lab[duzlem]):
@@ -531,6 +560,18 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
         n /= np.linalg.norm(n)
         vs = np.unique(F[fs])
         duzlemler[int(r)] = (n, float(np.mean(V0[vs] @ n)), vs)
+    sil_kose = {}
+    for f in np.where(duvar >= 0)[0]:
+        for v in F[f]:
+            sil_kose[int(v)] = int(duvar[f])
+
+    def silindire(x, i):
+        d = delikler[i]
+        r = x - d["nokta"]
+        t = r @ d["eksen"]
+        rad = r - t * d["eksen"]
+        return d["nokta"] + t * d["eksen"] + rad / np.linalg.norm(rad) * d["R"]
+
     for _ in range(5):
         kisitlar = defaultdict(list)
         for r, (n, d0, vs) in duzlemler.items():
@@ -538,28 +579,50 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
                 kisitlar[int(v)].append((r, n, d0))
         V[:] = V0
         basarisiz = set()
-        for v, ks in kisitlar.items():
-            N = np.array([k[1] for k in ks])
-            d = np.array([k[2] for k in ks])
-            kayma = np.linalg.pinv(N, rcond=1e-3) @ (d - N @ V0[v])
-            if np.linalg.norm(kayma) < duz_tol * 10 and np.abs(N @ (V0[v] + kayma) - d).max() < duz_tol * 1e-3:
-                V[v] = V0[v] + kayma
+        for v in set(kisitlar) | set(sil_kose):
+            ks = kisitlar.get(v, [])
+            x = V0[v].copy()
+            N = np.array([k[1] for k in ks]) if ks else None
+            d = np.array([k[2] for k in ks]) if ks else None
+            for _ in range(30 if v in sil_kose and ks else 1):
+                if ks:
+                    x = x + np.linalg.pinv(N, rcond=1e-3) @ (d - N @ x)
+                if v in sil_kose:
+                    x = silindire(x, sil_kose[v])
+            sinir = duz_tol * 10 if v not in sil_kose else max(duz_tol * 10, 0.05 * delikler[sil_kose[v]]["R"])
+            iyi = np.linalg.norm(x - V0[v]) < sinir
+            if ks:
+                iyi &= np.abs(N @ x - d).max() < duz_tol * 1e-2
+            if iyi:
+                V[v] = x
             else:
                 basarisiz |= {k[0] for k in ks}
+                if not ks:
+                    V[v] = x
         if not basarisiz:
             break
         for r in basarisiz:
             duzlemler.pop(r)
-    duzlem = np.isin(lab, list(duzlemler.keys()))
-    serbest = ~duzlem
+    duzlem = np.isin(lab, list(duzlemler.keys())) & (duvar < 0)
+    serbest = (~duzlem) & (duvar < 0)
 
-    keskin = {(int(e[0]), int(e[1])) for e, a in zip(ae, ang) if a >= keskin_aci}
-    duz_kenar = set(keskin)
+    agiz = set()
+    keskin = set()
+    for (f0, f1), e, a_ in zip(adj, ae, ang):
+        e = (int(e[0]), int(e[1]))
+        if (duvar[f0] >= 0) != (duvar[f1] >= 0) or (duvar[f0] >= 0 and duvar[f0] != duvar[f1]):
+            agiz.add(e)
+            keskin.add(e)
+        elif a_ >= keskin_aci:
+            keskin.add(e)
+    duz_kenar = {e for e in keskin if e not in agiz}
     for (f0, f1), e in zip(adj, ae):
-        if duzlem[f0] or duzlem[f1]:
-            duz_kenar.add((int(e[0]), int(e[1])))
+        e = (int(e[0]), int(e[1]))
+        if (duzlem[f0] or duzlem[f1]) and e not in agiz:
+            duz_kenar.add(e)
 
-    # köşe normalleri: keskin kenar geçilmeden ulaşılan yüzlerin alan ağırlıklı ortalaması
+    # köşe normalleri: keskin kenar geçilmeden ulaşılan yüzlerin alan ağırlıklı ortalaması.
+    # Düzlem yüzlerde bölge normali, duvar yüzlerde silindirin tam normali kullanılır.
     kose_yuz = defaultdict(list)
     kenar_yuz = defaultdict(list)
     for f in range(nf):
@@ -596,6 +659,16 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
             n /= max(np.linalg.norm(n), 1e-300)
             for f in g:
                 KN[(f, v)] = n
+    for f in np.where(duzlem)[0]:
+        n = duzlemler[int(lab[f])][0]
+        for v in F[f]:
+            KN[(f, int(v))] = n
+    for f in np.where(duvar >= 0)[0]:
+        d = delikler[duvar[f]]
+        for v in F[f]:
+            r = V[v] - d["nokta"]
+            rad = r - (r @ d["eksen"]) * d["eksen"]
+            KN[(f, int(v))] = -rad / np.linalg.norm(rad)
 
     egri = {}
 
@@ -604,37 +677,61 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
         e = (min(a, b), max(a, b))
         if e not in egri:
             x, y = e
-            egri[e] = kenar_kontrol(V[x], KN[(f, x)], V[y], KN[(f, y)], e in duz_kenar)
+            if e in agiz:
+                fs = kenar_yuz[e]
+                w = [g for g in fs if duvar[g] >= 0][0]
+                n = [g for g in fs if g != w][0]
+                egri[e] = agiz_kontrol(V[x], KN[(w, x)], KN[(n, x)], V[y], KN[(w, y)], KN[(n, y)])
+            else:
+                egri[e] = kenar_kontrol(V[x], KN[(f, x)], V[y], KN[(f, y)], e in duz_kenar)
         c = egri[e]
         return c if a == e[0] else c[::-1]
 
-    es = esle(m, serbest, duz_kenar)
+    es = esle(m, serbest, duz_kenar | agiz)
     bolunen = np.where(serbest & (es < 0))[0]
 
-    orta = {}
+    orta = set()
     for f in bolunen:
         for j in range(3):
             a, b = int(F[f, j]), int(F[f, (j + 1) % 3])
-            orta[(min(a, b), max(a, b))] = ikiye_bol(kenar(a, b, f))[0][3]
+            orta.add((min(a, b), max(a, b)))
+
+    def tel(f):
+        """Üçgenin kenarlarından (bölünmüş kenarlar iki parça) OCC teli."""
+        w = BRepBuilderAPI_MakeWire()
+        for j in range(3):
+            a, b = int(F[f, j]), int(F[f, (j + 1) % 3])
+            c = kenar(a, b, f)
+            if (min(a, b), max(a, b)) in orta:
+                for h in ikiye_bol(c):
+                    w.Add(kenar_ocp(h))
+            else:
+                w.Add(kenar_ocp(c))
+        return w.Wire() if w.IsDone() else None
 
     yuzler = []
-    tip = {"dortgen": 0, "bolunmus": 0, "duzlem_ucgen": 0}
+    tip = {"dortgen": 0, "bolunmus": 0, "duzlem_ucgen": 0, "duvar_ucgen": 0, "kurulamayan": 0}
     for f in range(nf):
-        if duzlem[f]:
-            pts = []
-            for j in range(3):
-                a, b = int(F[f, j]), int(F[f, (j + 1) % 3])
-                pts.append(V[a])
-                e = (min(a, b), max(a, b))
-                if e in orta:
-                    pts.append(orta[e])
-            yz = poligon_yuz(pts)
-            if yz is not None and np.linalg.norm(np.cross(pts[1] - pts[0], pts[-1] - pts[0])) < duz_tol ** 2:
-                tip.setdefault("sifir_alan", 0)
-                tip["sifir_alan"] += 1
-            if yz is not None:
-                yuzler.append(yz)
-                tip["duzlem_ucgen"] += 1
+        if duzlem[f] or duvar[f] >= 0:
+            w = tel(f)
+            yz = None
+            if w is not None:
+                if duzlem[f]:
+                    mf = BRepBuilderAPI_MakeFace(w, True)
+                else:
+                    mf = BRepBuilderAPI_MakeFace(silindirler[int(duvar[f])], w, True)
+                if mf.IsDone():
+                    yz = mf.Face()
+                    if duvar[f] >= 0:
+                        sf = ShapeFix_Face(yz)
+                        sf.SetPrecision(duz_tol)
+                        sf.Perform()
+                        yz = sf.Face()
+            if yz is None:
+                tip["kurulamayan"] += 1
+                continue
+            yuzler.append(yz)
+            tip["duzlem_ucgen" if duzlem[f] else "duvar_ucgen"] += 1
             continue
         g = int(es[f])
         if g >= 0:
@@ -677,6 +774,7 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
             ic2 = kenar_kontrol(h_once[3], N2 / np.linalg.norm(N2), merkez, Nm, False)
             yuzler.append(bezier_yuz(coons_ag(h_sonra, ic1, ic2, h_once)))
         tip["bolunmus"] += 1
+    tip["silindir"] = len(silindirler)
     return yuzler, tip
 
 
@@ -738,8 +836,6 @@ def main():
     ap.add_argument("--keskin-aci", type=float, default=30.0,
                     help="Bu açıdan (derece) büyük kenarlar keskin kalır")
     ap.add_argument("--delik-yok", action="store_true", help="Delikleri silindire çevirme")
-    ap.add_argument("--toplu-kes", action="store_true",
-                    help="Delikleri tek boolean işlemiyle kes (büyük modellerde çok yavaş olabilir)")
     ap.add_argument("--sapma", action="store_true", help="Sonucun girdi ağından sapmasını ölç")
     a = ap.parse_args()
 
@@ -757,12 +853,10 @@ def main():
     orijinal = m.copy()
     tol = np.linalg.norm(m.extents) * 1e-6
 
-    araclar = []
+    delikler = []
     if not a.delik_yok:
-        m, araclar = delikleri_tika(m, delik_bul(m, a.keskin_aci))
-        log(f"Delik: {len(araclar)} silindir bulundu, ağ tıkandı (su geçirmez={m.is_watertight})")
-        if not m.is_watertight:
-            m = onar(m)
+        delikler = delik_bul(m, a.keskin_aci)
+        log(f"Delik: {len(delikler)} tam silindirik delik bulundu")
 
     if a.hedef_ucgen and len(m.faces) > a.hedef_ucgen:
         m = indirge(m, a.hedef_ucgen)
@@ -781,9 +875,10 @@ def main():
     if not m.is_watertight:
         sys.exit("HATA: temizleme sonrası ağ su geçirmez değil")
 
-    yuzler, tip = yuzleri_kur(m, a.keskin_aci, duz_tol=tol * 10)
+    yuzler, tip = yuzleri_kur(m, a.keskin_aci, duz_tol=tol * 10, delikler=delikler)
     log(f"Yüz: {len(yuzler)} (dörtgen {tip['dortgen']}, bölünen üçgen {tip['bolunmus']}, "
-        f"düzlem parçası {tip['duzlem_ucgen']}) ({time.time() - t0:.0f} sn)")
+        f"düzlem parçası {tip['duzlem_ucgen']}, silindir duvar parçası {tip['duvar_ucgen']} / "
+        f"{tip['silindir']} delik, kurulamayan {tip['kurulamayan']}) ({time.time() - t0:.0f} sn)")
 
     dikis = BRepBuilderAPI_Sewing(tol)
     for f in yuzler:
@@ -818,55 +913,6 @@ def main():
     birlestir.Build()
     kati = birlestir.Shape()
     log(f"Katı: geçerli={BRepCheck_Analyzer(kati).IsValid()} ({time.time() - t0:.0f} sn)")
-
-    if araclar:
-        silindirler = [BRepPrimAPI_MakeCylinder(
-            gp_Ax2(gp_Pnt(*map(float, p)), gp_Dir(*map(float, ax))), float(R), float(h)).Shape()
-            for p, ax, R, h in araclar]
-
-        def hacim(sekil):
-            g = GProp_GProps()
-            BRepGProp.VolumeProperties_s(sekil, g)
-            return abs(g.Mass())
-
-        def kes(govde, araclar_):
-            argl, tl = TopTools_ListOfShape(), TopTools_ListOfShape()
-            argl.Append(govde)
-            for t in araclar_:
-                tl.Append(t)
-            k = BRepAlgoAPI_Cut()
-            k.SetArguments(argl)
-            k.SetTools(tl)
-            k.SetRunParallel(True)
-            k.Build()
-            if not k.IsDone() or not BRepCheck_Analyzer(k.Shape()).IsValid():
-                return None
-            once, sonra = hacim(govde), hacim(k.Shape())
-            if not (0.5 * once < sonra < once):  # kesim gövdenin büyük kısmını silmemeli
-                return None
-            return k.Shape()
-
-        sonuc = kes(kati, silindirler) if a.toplu_kes else None
-        if sonuc is not None:
-            kati = sonuc
-            log(f"Delikler kesildi: {len(silindirler)}/{len(silindirler)} ({time.time() - t0:.0f} sn)")
-        else:
-            if a.toplu_kes:
-                log("  toplu kesim geçersiz sonuç verdi, delikler tek tek kesiliyor")
-            basarili = 0
-            for i, t in enumerate(silindirler):
-                sonuc = kes(kati, [t])
-                if sonuc is not None:
-                    kati = sonuc
-                    basarili += 1
-                else:
-                    log(f"  UYARI: {i + 1}. delik kesilemedi, tıkalı bırakıldı")
-                log(f"  delik {i + 1}/{len(silindirler)} ({time.time() - t0:.0f} sn)")
-            log(f"Delikler kesildi: {basarili}/{len(silindirler)} ({time.time() - t0:.0f} sn)")
-        birlestir = ShapeUpgrade_UnifySameDomain(kati, True, True, True)
-        birlestir.Build()
-        if BRepCheck_Analyzer(birlestir.Shape()).IsValid():
-            kati = birlestir.Shape()
 
     gecerli = BRepCheck_Analyzer(kati).IsValid()
     props = GProp_GProps()
