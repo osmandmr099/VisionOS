@@ -72,7 +72,16 @@ GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, ki�
   - Sapma ortalama 0,013 mm, %99'u 0,064 mm'nin altında
 - STEP dosyası lisans nedeniyle repoya konmadı; konuşma üzerinden kullanıcıya gönderildi
 
-- Kullanıcı STEP'i Fusion'da açtı: tek gövde olarak yüklendi, yüzler dörtgen yamalar hâlinde görünüyor (14.10.2026)
+- 20 bin üçgen sürümü (`--hedef-ucgen 20000`):
+  - 10.666 yüz, tek geçerli katı, hacim farkı %0,37
+  - Sapma ortalama 0,025 mm, %99'u 0,12 mm'nin altında
+  - 35 delik silindir olarak kuruldu
+  - Kullanıcıya gönderildi
+- Büyük yüzey modu (`buyuk_yuzey.py`, deneysel): bölge başına tek B-spline yüzey
+  - Son deneme: 2.734 yüz, ama geçersiz katı (16 kabuk, 508 açık kenar), hacim %90
+  - Keskin kırıntılardan 754 tane 3 kenarlı yüz çıkıyor
+  - Kullanılabilir değil
+- Kullanıcı STEP'i Fusion'da açtı: tek gövde olarak yüklendi, yüzler dörtgen yamalar hâlinde görünüyor; kesme işlemi çalıştı (14.10.2026)
 
 ## Açık konular
 - STEP üzerinde Pi5 ve AIO yuvaları için düzenleme (kesme/ekleme) işlemlerinin Fusion'da denenmesi
