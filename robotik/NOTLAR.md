@@ -55,7 +55,8 @@ GPS ile noktadan noktaya giden bir otonomi **değil**. Görüntüye dayalı, ki�
   - AIO'muz 25,5×25,5 olduğu için FC yuvası uymuyor; adaptör ya da yuva değişikliği gerekiyor
   - Lisans (srhzrl sayfası): dosyaların ve türev çalışmaların (remix dahil) paylaşılması/dağıtılması yasak
   - **SEÇİLDİ.** Üzerine Pi5 ve AIO yerleşimi için değişiklik yapılacak
-  - STEP durumu: XL için STEP yok; remix sahibi bir yorumda STL üzerinden yeniden çalıştığını söylüyor. Orijinal Aether 4'ün (4") kaynağı Onshape'te, tasarımcı oradan istenen formatta dışa aktarılabileceğini yazıyor
+  - STEP durumu: XL için STEP yok; remix sahibi bir yorumda STL üzerinden yeniden çalıştığını söylüyor. Orijinal Aether 4'ün (4") kaynağı Onshape'te, ama kullanıcı kontrol etti: **o da üçgenlerden oluşuyor**
+  - Kullanıcı şartı: düzenlenecek modelde üçgen yüzeyler olmamalı
 - Proje **ticari amaçlı değil**
 - Aether ailesinin diğer sürümleri: orijinal BM Aether 4 (4–4,5"), Aether 2.5/3 (hashi), Thingiverse "aether 4" (sdamir2, O4 Pro revizyonu), ayrıca alıcı/GPS adaptörleri (madcatcad, user_1936875010)
 - Beğenilmeyenler: Aether 4, Grasshopper5, katlanır modüler 5", Elecrow ModuFrame-5, Drone Frame V1 ve Cults3D/Printables/Thingiverse/Thangs'tan önerilen diğer 9 aday
