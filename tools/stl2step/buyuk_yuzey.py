@@ -468,7 +468,7 @@ def donustur(m, sinif, orijinal, keskin_aci=30.0, hedef_alan=400.0, koni=45.0,
                 if hata.max() < yuzey_tol or ncp >= ust:
                     break
                 ncp = min(ust, int(ncp * 1.4) + 1)
-            hatalar.append(hata.max())
+            hatalar.append((hata.max(), len(fs), ncp, ust))
             yuzey = bspline_yuzey(Q, ud[2], vd[2])
             ozet["organik"] += 1
         elif r in duz_id.values():
@@ -494,25 +494,34 @@ def donustur(m, sinif, orijinal, keskin_aci=30.0, hedef_alan=400.0, koni=45.0,
             mf_ = BRepBuilderAPI_MakeFace(yuzey, teller[0], True)
             for w in teller[1:]:
                 mf_.Add(w)
-            return mf_
-        mf = kur(tel)
-        if not mf.IsDone():
+            if not mf_.IsDone():
+                return None
+            try:
+                sf = ShapeFix_Face(mf_.Face())
+                sf.SetPrecision(1e-4)
+                sf.SetMaxTolerance(0.5)
+                sf.Perform()
+                return sf.Face()
+            except Exception:
+                return mf_.Face()
+        yz = kur(tel)
+        if yz is None:
             ozet["yuz_kurulamadi"] += 1
             continue
-        if not BRepCheck_Analyzer(mf.Face()).IsValid():
+        if not BRepCheck_Analyzer(yz).IsValid():
             ters = kur([_tel(w.Reversed()) for w in tel])
-            if ters.IsDone() and BRepCheck_Analyzer(ters.Face()).IsValid():
-                mf = ters
+            if ters is not None and BRepCheck_Analyzer(ters).IsValid():
+                yz = ters
                 ozet["ters_tel"] += 1
-        try:
-            sf = ShapeFix_Face(mf.Face())
-            sf.Perform()
-            yuzler.append(sf.Face())
-        except Exception:
-            tur_ = "organik" if r < n_org else ("duzlem" if r in duz_id.values() else "silindir")
-            ozet["onarilamadi_" + tur_] += 1
-            ozet.setdefault("onarilamayan_bolgeler", [])
-            ozet["onarilamayan_bolgeler"].append(r)
-            yuzler.append(mf.Face())
-    ozet["uydurma_en_buyuk_hata"] = float(np.max(hatalar)) if hatalar else 0.0
+            else:
+                ozet["gecersiz_" + ("organik" if r < n_org else ("duzlem" if r in duz_id.values() else "silindir"))] += 1
+        yuzler.append(yz)
+    if hatalar:
+        h = np.array([x[0] for x in hatalar])
+        ozet["uydurma_hata_medyan"] = float(np.median(h))
+        ozet["uydurma_hata_p90"] = float(np.percentile(h, 90))
+        ozet["uydurma_en_buyuk_hata"] = float(h.max())
+        ozet["tol_ustu_bolge"] = int((h > yuzey_tol).sum())
+        kotu = sorted(hatalar, key=lambda x: -x[0])[:5]
+        ozet["en_kotu_5(hata,ucgen,ncp,ust)"] = [tuple(round(float(y), 3) for y in x) for x in kotu]
     return yuzler, dict(ozet)
