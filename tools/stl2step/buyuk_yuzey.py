@@ -264,22 +264,22 @@ def yuzey_uydur(P, n, e1, e2, merkez, duzgunluk=1e-4):
     va, vb = v.min() - pay_v, v.max() + pay_v
     Bu, ku = _bspline_tabani(u, n, ua, ub)
     Bv, kv = _bspline_tabani(v, n, va, vb)
-    # satır i: kron(Bu_i, Bv_i)
-    Bu = Bu.tocoo()
-    Bv = Bv.tocsr()
-    rows, cols, vals = [], [], []
-    Bu_csr = Bu.tocsr()
-    for i in range(len(P)):
-        su = Bu_csr.getrow(i)
-        sv = Bv.getrow(i)
-        for cu, xu in zip(su.indices, su.data):
-            for cv, xv in zip(sv.indices, sv.data):
-                rows.append(i)
-                cols.append(cu * n + cv)
-                vals.append(xu * xv)
+    # satır i: kron(Bu_i, Bv_i); kübik tabanda her satırda tam 4 sıfırdan farklı değer var
+    Bu = sp.csr_matrix(Bu)
+    Bv = sp.csr_matrix(Bv)
+    N = len(P)
+    iu = Bu.indices.reshape(N, -1)
+    xu = Bu.data.reshape(N, -1)
+    iv = Bv.indices.reshape(N, -1)
+    xv = Bv.data.reshape(N, -1)
+    cols = (iu[:, :, None] * n + iv[:, None, :]).reshape(N, -1)
+    vals = (xu[:, :, None] * xv[:, None, :]).reshape(N, -1)
+    rows = np.repeat(np.arange(N), cols.shape[1])
+    cols = cols.ravel()
+    vals = vals.ravel()
     M = sp.csr_matrix((vals, (rows, cols)), shape=(len(P), n * n))
     # ikinci fark düzgünlük terimi
-    D1 = sp.diags([1, -2, 1], [0, 1, 2], shape=(n - 2, n))
+    D1 = sp.diags([1.0, -2.0, 1.0], [0, 1, 2], shape=(n - 2, n))
     I = sp.identity(n)
     R = sp.vstack([sp.kron(D1, I), sp.kron(I, D1)])
     olcek = (M.multiply(M)).sum() / max(R.multiply(R).sum(), 1)
