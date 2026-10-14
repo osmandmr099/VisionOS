@@ -802,6 +802,11 @@ def main():
             gp_Ax2(gp_Pnt(*map(float, p)), gp_Dir(*map(float, ax))), float(R), float(h)).Shape()
             for p, ax, R, h in araclar]
 
+        def hacim(sekil):
+            g = GProp_GProps()
+            BRepGProp.VolumeProperties_s(sekil, g)
+            return abs(g.Mass())
+
         def kes(govde, araclar_):
             argl, tl = TopTools_ListOfShape(), TopTools_ListOfShape()
             argl.Append(govde)
@@ -813,6 +818,9 @@ def main():
             k.SetRunParallel(True)
             k.Build()
             if not k.IsDone() or not BRepCheck_Analyzer(k.Shape()).IsValid():
+                return None
+            once, sonra = hacim(govde), hacim(k.Shape())
+            if not (0.5 * once < sonra < once):  # kesim gövdenin büyük kısmını silmemeli
                 return None
             return k.Shape()
 
