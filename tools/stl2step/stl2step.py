@@ -240,28 +240,155 @@ def indirge(m, hedef):
     return d
 
 
-def temizle(m, esik):
-    """Birbirine `esik`ten yakın köşeleri birleştirir, ince (T-köşeli) üçgenleri giderir.
-    Dikiş toleransından kısa kenarlar katıyı geçersiz yapar."""
-    try:
-        import pymeshlab as pml
-    except ImportError:
-        return m
-    deger = getattr(pml, "PureValue", None) or getattr(pml, "AbsoluteValue")
-    ms = pml.MeshSet()
-    ms.add_mesh(pml.Mesh(m.vertices, m.faces))
-    ms.meshing_merge_close_vertices(threshold=deger(esik))
-    ms.meshing_remove_duplicate_faces()
-    ms.meshing_remove_null_faces()
-    ms.meshing_remove_t_vertices(method="Edge Collapse", threshold=40, repeat=True)
-    ms.meshing_remove_null_faces()
-    ms.meshing_repair_non_manifold_edges(method="Remove Faces")
-    ms.meshing_repair_non_manifold_vertices()
-    ms.meshing_remove_unreferenced_vertices()
-    cm = ms.current_mesh()
-    d = trimesh.Trimesh(cm.vertex_matrix(), cm.face_matrix(), process=True)
-    if not d.is_watertight:
-        d = onar(d)
+def kumeleri_coker(m, esik):
+    """Birbirine `esik`ten kısa kenarlarla bağlı köşe kümelerini tek köşeye indirir:
+    kümeye dokunan üçgenler silinir, açılan halka kümenin merkezinden yelpazeyle kapatılır."""
+    eu = m.edges_unique
+    kisa = eu[m.edges_unique_length < esik]
+    if not len(kisa):
+        return m, 0
+    nv = len(m.vertices)
+    nc, lab = connected_components(
+        coo_matrix((np.ones(len(kisa)), (kisa[:, 0], kisa[:, 1])), shape=(nv, nv)), directed=False)
+    boy = np.bincount(lab)
+    V = list(np.asarray(m.vertices, float))
+    F = np.asarray(m.faces)
+    sil = np.zeros(len(F), bool)
+    yeni = []
+    for k in np.where(boy > 1)[0]:
+        kume = np.where(lab == k)[0]
+        dokunan = np.isin(F, kume).any(1) & ~sil
+        if not dokunan.any():
+            continue
+        alt = F[dokunan]
+        he = np.concatenate([alt[:, [0, 1]], alt[:, [1, 2]], alt[:, [2, 0]]])
+        ks = set(map(tuple, he.tolist()))
+        sinir = [(a, b) for a, b in he.tolist() if (b, a) not in ks and a not in kume and b not in kume]
+        sonraki = {a: b for a, b in sinir}
+        if len(sonraki) != len(sinir) or not sinir:
+            continue  # halka basit değil: dokunma
+        dongu = [sinir[0][0]]
+        while True:
+            n = sonraki.get(dongu[-1])
+            if n is None or n == dongu[0] or len(dongu) > len(sinir):
+                break
+            dongu.append(n)
+        if len(dongu) != len(sinir):
+            continue
+        sil |= dokunan
+        c = len(V)
+        V.append(np.asarray(m.vertices)[kume].mean(0))
+        for j in range(len(dongu)):
+            yeni.append([dongu[j], dongu[(j + 1) % len(dongu)], c])
+    if not yeni:
+        return m, 0
+    d = trimesh.Trimesh(np.array(V), np.vstack([F[~sil], np.array(yeni)]), process=True)
+    d.remove_unreferenced_vertices()
+    return d, int((boy > 1).sum())
+
+
+def temizle(m, esik, keskin_aci=30.0):
+    """Dikiş toleransına yakın kısa kenarları çökertir, ince üçgenlerin uzun kenarını çevirir.
+    Her işlemden önce link koşulu denetlenir; ağ manifold ve su geçirmez kalır."""
+    m, kume_sayisi = kumeleri_coker(m, esik)
+    if kume_sayisi:
+        log(f"  temizlik: {kume_sayisi} mikro köşe kümesi tek köşeye indirildi")
+    V = np.array(m.vertices, float)
+    F = [list(map(int, f)) for f in m.faces]
+    canli = [True] * len(F)
+    kose_yuz = defaultdict(set)
+    for i, f in enumerate(F):
+        for v in f:
+            kose_yuz[v].add(i)
+
+    def komsular(v):
+        return {w for i in kose_yuz[v] for w in F[i] if w != v}
+
+    def normal(f):
+        n = np.cross(V[f[1]] - V[f[0]], V[f[2]] - V[f[0]])
+        L = np.linalg.norm(n)
+        return n / L if L > 0 else n
+
+    def kenar_yuzleri(a, b):
+        return [i for i in kose_yuz[a] & kose_yuz[b]]
+
+    cokme = cevirme = 0
+    for _ in range(10):
+        degisti = False
+        # 1) kısa kenar çökertme
+        for i in range(len(F)):
+            if not canli[i]:
+                continue
+            f = F[i]
+            for j in range(3):
+                a, b = f[j], f[(j + 1) % 3]
+                if np.linalg.norm(V[a] - V[b]) >= esik:
+                    continue
+                ortak = komsular(a) & komsular(b)
+                ef = kenar_yuzleri(a, b)
+                if len(ef) != 2 or len(ortak) != 2:
+                    continue
+                yeni_p = (V[a] + V[b]) / 2
+                eski = V[a].copy()
+                kalan = (kose_yuz[a] | kose_yuz[b]) - set(ef)
+                once = {k: normal([b if v == b else (a if v == a else v) for v in F[k]]) for k in kalan}
+                V[a] = yeni_p
+                ters = False
+                for k in kalan:
+                    yf = [a if v == b else v for v in F[k]]
+                    if np.dot(normal(yf), once[k]) < 0.2:
+                        ters = True
+                        break
+                if ters:
+                    V[a] = eski
+                    continue
+                for k in ef:
+                    canli[k] = False
+                    for v in F[k]:
+                        kose_yuz[v].discard(k)
+                for k in list(kose_yuz[b]):
+                    F[k] = [a if v == b else v for v in F[k]]
+                    kose_yuz[a].add(k)
+                kose_yuz[b] = set()
+                cokme += 1
+                degisti = True
+                break
+        # 2) ince üçgen: en uzun kenarı çevir
+        for i in range(len(F)):
+            if not canli[i]:
+                continue
+            f = F[i]
+            L = [np.linalg.norm(V[f[(j + 1) % 3]] - V[f[j]]) for j in range(3)]
+            j = int(np.argmax(L))
+            alan = np.linalg.norm(np.cross(V[f[1]] - V[f[0]], V[f[2]] - V[f[0]])) / 2
+            if 2 * alan / L[j] >= esik:
+                continue
+            a, b, c = f[j], f[(j + 1) % 3], f[(j + 2) % 3]
+            ef = [k for k in kenar_yuzleri(a, b) if k != i]
+            if len(ef) != 1:
+                continue
+            g = ef[0]
+            d = [v for v in F[g] if v != a and v != b][0]
+            if d in komsular(c):
+                continue
+            n1, n2 = normal([c, a, d]), normal([d, b, c])
+            n0 = normal(F[g])
+            if np.dot(n1, n0) < 0.5 or np.dot(n2, n0) < 0.5:
+                continue
+            for k in (i, g):
+                for v in F[k]:
+                    kose_yuz[v].discard(k)
+            F[i], F[g] = [c, a, d], [d, b, c]
+            for k in (i, g):
+                for v in F[k]:
+                    kose_yuz[v].add(k)
+            cevirme += 1
+            degisti = True
+        if not degisti:
+            break
+    d = trimesh.Trimesh(V, np.array([f for f, c in zip(F, canli) if c]), process=True)
+    d.remove_unreferenced_vertices()
+    log(f"  temizlik: {cokme} kenar çöktü, {cevirme} kenar çevrildi")
     return d
 
 
@@ -604,7 +731,7 @@ def main():
         m = indirge(m, a.hedef_ucgen)
         log(f"İndirgendi: {len(m.faces)} üçgen, su geçirmez={m.is_watertight} ({time.time() - t0:.0f} sn)")
 
-    m = temizle(m, tol * 30)
+    m = temizle(m, tol * 30, a.keskin_aci)
     e = m.edges_unique_length
     log(f"Temizlendi: {len(m.faces)} üçgen, en kısa kenar={e.min():.5f}, su geçirmez={m.is_watertight}")
     if not m.is_watertight:
@@ -614,7 +741,7 @@ def main():
     log(f"Yüz: {len(yuzler)} (dörtgen {tip['dortgen']}, bölünen üçgen {tip['bolunmus']}, "
         f"düzlem parçası {tip['duzlem_ucgen']}) ({time.time() - t0:.0f} sn)")
 
-    dikis = BRepBuilderAPI_Sewing(tol * 10)
+    dikis = BRepBuilderAPI_Sewing(tol)
     for f in yuzler:
         dikis.Add(f)
     dikis.Perform()
