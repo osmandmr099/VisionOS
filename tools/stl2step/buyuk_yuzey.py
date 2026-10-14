@@ -31,7 +31,9 @@ from OCP.GeomAbs import GeomAbs_C2
 from OCP.GeomAPI import GeomAPI_PointsToBSpline
 from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
 from OCP.ShapeFix import ShapeFix_Face
-from OCP.TopoDS import TopoDS_Shell
+from OCP.TopoDS import TopoDS
+
+_kenar = getattr(TopoDS, "Edge_s", None) or TopoDS.Edge
 
 try:
     from OCP.TColgp import TColgp_Array1OfPnt, TColgp_Array2OfPnt
@@ -466,7 +468,7 @@ def donustur(m, sinif, orijinal, keskin_aci=30.0, hedef_alan=400.0, koni=70.0,
         for seq in donguler(r):
             w = BRepBuilderAPI_MakeWire()
             for pidx, ileri in seq:
-                w.Add(kenarlar[pidx] if ileri else kenarlar[pidx].Reversed())
+                w.Add(kenarlar[pidx] if ileri else _kenar(kenarlar[pidx].Reversed()))
             if w.IsDone():
                 tel.append(w.Wire())
         if not tel:
