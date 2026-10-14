@@ -534,7 +534,9 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
     for v, ks in kisitlar.items():
         N = np.array([k[0] for k in ks])
         d = np.array([k[1] for k in ks])
-        V[v] = V[v] + np.linalg.pinv(N) @ (d - N @ V[v])
+        kayma = np.linalg.pinv(N, rcond=1e-3) @ (d - N @ V[v])
+        if np.linalg.norm(kayma) < duz_tol * 10:  # yalnız tolerans içindeki köşeleri oturt
+            V[v] = V[v] + kayma
 
     keskin = {(int(e[0]), int(e[1])) for e, a in zip(ae, ang) if a >= keskin_aci}
     duz_kenar = set(keskin)
@@ -612,6 +614,9 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
                 if e in orta:
                     pts.append(orta[e])
             yz = poligon_yuz(pts)
+            if yz is not None and np.linalg.norm(np.cross(pts[1] - pts[0], pts[-1] - pts[0])) < duz_tol ** 2:
+                tip.setdefault("sifir_alan", 0)
+                tip["sifir_alan"] += 1
             if yz is not None:
                 yuzler.append(yz)
                 tip["duzlem_ucgen"] += 1
