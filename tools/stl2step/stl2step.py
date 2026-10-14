@@ -502,7 +502,7 @@ def esle(m, serbest, yasak_kenar):
 
 
 def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
-    V = np.asarray(m.vertices, float)
+    V = np.array(m.vertices, float)
     F = np.asarray(m.faces)
     FN = m.face_normals
     nf = len(F)
@@ -520,6 +520,22 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
     duzlem = np.bincount(lab)[lab] >= 2
     serbest = ~duzlem
 
+    # her düz bölge için ortak düzlem; köşeler bu düzlem(ler)e tam oturtulur
+    kisitlar = defaultdict(list)
+    alan = m.area_faces
+    for r in np.unique(lab[duzlem]):
+        fs = np.where(lab == r)[0]
+        n = (FN[fs] * alan[fs][:, None]).sum(0)
+        n /= np.linalg.norm(n)
+        vs = np.unique(F[fs])
+        d0 = float(np.mean(V[vs] @ n))
+        for v in vs:
+            kisitlar[int(v)].append((n, d0))
+    for v, ks in kisitlar.items():
+        N = np.array([k[0] for k in ks])
+        d = np.array([k[1] for k in ks])
+        V[v] = V[v] + np.linalg.pinv(N) @ (d - N @ V[v])
+
     keskin = {(int(e[0]), int(e[1])) for e, a in zip(ae, ang) if a >= keskin_aci}
     duz_kenar = set(keskin)
     for (f0, f1), e in zip(adj, ae):
@@ -527,7 +543,6 @@ def yuzleri_kur(m, keskin_aci, duz_tol, duz_aci=0.25):
             duz_kenar.add((int(e[0]), int(e[1])))
 
     # köşe normalleri: keskin kenar geçilmeden ulaşılan yüzlerin alan ağırlıklı ortalaması
-    alan = m.area_faces
     kose_yuz = defaultdict(list)
     kenar_yuz = defaultdict(list)
     for f in range(nf):
@@ -732,6 +747,13 @@ def main():
         log(f"İndirgendi: {len(m.faces)} üçgen, su geçirmez={m.is_watertight} ({time.time() - t0:.0f} sn)")
 
     m = temizle(m, tol * 30, a.keskin_aci)
+    parcalar = m.split(only_watertight=False)
+    if len(parcalar) > 1:
+        hacim = np.array([abs(p.volume) for p in parcalar])
+        tut = [p for p, h in zip(parcalar, hacim) if h > hacim.max() * 1e-6]
+        log(f"  {len(parcalar) - len(tut)} sıfır hacimli parça atıldı")
+        m = trimesh.util.concatenate(tut)
+        m.merge_vertices()
     e = m.edges_unique_length
     log(f"Temizlendi: {len(m.faces)} üçgen, en kısa kenar={e.min():.5f}, su geçirmez={m.is_watertight}")
     if not m.is_watertight:
@@ -749,11 +771,24 @@ def main():
     log(f"Dikildi: serbest kenar={dikis.NbFreeEdges()}, çoklu kenar={dikis.NbMultipleEdges()} "
         f"({time.time() - t0:.0f} sn)")
 
-    yapici = BRepBuilderAPI_MakeSolid()
+    kabuklar = []
     exp = TopExp_Explorer(sekil, TopAbs_SHELL)
     while exp.More():
-        yapici.Add(_shell(exp.Current()))
+        kb = _shell(exp.Current())
+        g = GProp_GProps()
+        BRepGProp.VolumeProperties_s(BRepBuilderAPI_MakeSolid(kb).Solid(), g)
+        kabuklar.append((abs(g.Mass()), kb))
         exp.Next()
+    enbuyuk = max(h for h, _ in kabuklar)
+    yapici = BRepBuilderAPI_MakeSolid()
+    atilan = 0
+    for h, kb in kabuklar:
+        if h > enbuyuk * 1e-6:
+            yapici.Add(kb)
+        else:
+            atilan += 1
+    if atilan:
+        log(f"  {atilan} sıfır hacimli kabuk atıldı")
     duzelt = ShapeFix_Solid(yapici.Solid())
     duzelt.Perform()
     kati = duzelt.Solid()
@@ -763,24 +798,41 @@ def main():
     log(f"Katı: geçerli={BRepCheck_Analyzer(kati).IsValid()} ({time.time() - t0:.0f} sn)")
 
     if araclar:
-        argl, tl = TopTools_ListOfShape(), TopTools_ListOfShape()
-        argl.Append(kati)
-        for p, ax, R, h in araclar:
-            tl.Append(BRepPrimAPI_MakeCylinder(
-                gp_Ax2(gp_Pnt(*map(float, p)), gp_Dir(*map(float, ax))), float(R), float(h)).Shape())
-        kes = BRepAlgoAPI_Cut()
-        kes.SetArguments(argl)
-        kes.SetTools(tl)
-        kes.SetFuzzyValue(tol * 10)
-        kes.SetRunParallel(True)
-        kes.Build()
-        if not kes.IsDone():
-            log("UYARI: delik kesimi başarısız, delikler tıkalı bırakıldı")
+        silindirler = [BRepPrimAPI_MakeCylinder(
+            gp_Ax2(gp_Pnt(*map(float, p)), gp_Dir(*map(float, ax))), float(R), float(h)).Shape()
+            for p, ax, R, h in araclar]
+
+        def kes(govde, araclar_):
+            argl, tl = TopTools_ListOfShape(), TopTools_ListOfShape()
+            argl.Append(govde)
+            for t in araclar_:
+                tl.Append(t)
+            k = BRepAlgoAPI_Cut()
+            k.SetArguments(argl)
+            k.SetTools(tl)
+            k.SetRunParallel(True)
+            k.Build()
+            if not k.IsDone() or not BRepCheck_Analyzer(k.Shape()).IsValid():
+                return None
+            return k.Shape()
+
+        sonuc = kes(kati, silindirler)
+        if sonuc is not None:
+            kati = sonuc
+            log(f"Delikler kesildi: {len(silindirler)}/{len(silindirler)} ({time.time() - t0:.0f} sn)")
         else:
-            birlestir = ShapeUpgrade_UnifySameDomain(kes.Shape(), True, True, True)
-            birlestir.Build()
+            log("  toplu kesim geçersiz sonuç verdi, delikler tek tek kesiliyor")
+            basarili = 0
+            for t in silindirler:
+                sonuc = kes(kati, [t])
+                if sonuc is not None:
+                    kati = sonuc
+                    basarili += 1
+            log(f"Delikler kesildi: {basarili}/{len(silindirler)} ({time.time() - t0:.0f} sn)")
+        birlestir = ShapeUpgrade_UnifySameDomain(kati, True, True, True)
+        birlestir.Build()
+        if BRepCheck_Analyzer(birlestir.Shape()).IsValid():
             kati = birlestir.Shape()
-        log(f"Delikler kesildi ({time.time() - t0:.0f} sn)")
 
     gecerli = BRepCheck_Analyzer(kati).IsValid()
     props = GProp_GProps()
