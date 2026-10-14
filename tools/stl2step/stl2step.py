@@ -240,6 +240,31 @@ def indirge(m, hedef):
     return d
 
 
+def temizle(m, esik):
+    """Birbirine `esik`ten yakın köşeleri birleştirir, ince (T-köşeli) üçgenleri giderir.
+    Dikiş toleransından kısa kenarlar katıyı geçersiz yapar."""
+    try:
+        import pymeshlab as pml
+    except ImportError:
+        return m
+    deger = getattr(pml, "PureValue", None) or getattr(pml, "AbsoluteValue")
+    ms = pml.MeshSet()
+    ms.add_mesh(pml.Mesh(m.vertices, m.faces))
+    ms.meshing_merge_close_vertices(threshold=deger(esik))
+    ms.meshing_remove_duplicate_faces()
+    ms.meshing_remove_null_faces()
+    ms.meshing_remove_t_vertices(method="Edge Collapse", threshold=40, repeat=True)
+    ms.meshing_remove_null_faces()
+    ms.meshing_repair_non_manifold_edges(method="Remove Faces")
+    ms.meshing_repair_non_manifold_vertices()
+    ms.meshing_remove_unreferenced_vertices()
+    cm = ms.current_mesh()
+    d = trimesh.Trimesh(cm.vertex_matrix(), cm.face_matrix(), process=True)
+    if not d.is_watertight:
+        d = onar(d)
+    return d
+
+
 # ----------------------------------------------------------------------------- yüzey kurulumu
 
 def kenar_kontrol(Pa, Na, Pb, Nb, duz):
@@ -578,6 +603,12 @@ def main():
     if a.hedef_ucgen and len(m.faces) > a.hedef_ucgen:
         m = indirge(m, a.hedef_ucgen)
         log(f"İndirgendi: {len(m.faces)} üçgen, su geçirmez={m.is_watertight} ({time.time() - t0:.0f} sn)")
+
+    m = temizle(m, tol * 30)
+    e = m.edges_unique_length
+    log(f"Temizlendi: {len(m.faces)} üçgen, en kısa kenar={e.min():.5f}, su geçirmez={m.is_watertight}")
+    if not m.is_watertight:
+        sys.exit("HATA: temizleme sonrası ağ su geçirmez değil")
 
     yuzler, tip = yuzleri_kur(m, a.keskin_aci, duz_tol=tol * 10)
     log(f"Yüz: {len(yuzler)} (dörtgen {tip['dortgen']}, bölünen üçgen {tip['bolunmus']}, "
