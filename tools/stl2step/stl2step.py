@@ -524,7 +524,9 @@ def agiz_kontrol(Pa, Nwa, Nna, Pb, Nwb, Nnb):
     return np.array([Pa, Pa + ts[0] * L / 3, Pb - ts[1] * L / 3, Pb])
 
 
-def yuzleri_kur(m, keskin_aci, duz_tol, delikler=(), duz_aci=0.25):
+def siniflandir(m, duz_tol, delikler=(), duz_aci=0.25):
+    """Yüzleri düzlem / delik duvarı / organik olarak sınıflandırır ve köşeleri düzlem ve
+    silindirlerine oturtur. Oturtulmuş köşeleri ve etiketleri döndürür."""
     V = np.array(m.vertices, float)
     F = np.asarray(m.faces)
     FN = m.face_normals
@@ -605,6 +607,22 @@ def yuzleri_kur(m, keskin_aci, duz_tol, delikler=(), duz_aci=0.25):
             duzlemler.pop(r)
     duzlem = np.isin(lab, list(duzlemler.keys())) & (duvar < 0)
     serbest = (~duzlem) & (duvar < 0)
+
+    return dict(V=V, duvar=duvar, lab=lab, duzlem=duzlem, serbest=serbest,
+                duzlemler=duzlemler, silindirler=silindirler)
+
+
+def yuzleri_kur(m, keskin_aci, duz_tol, delikler=(), duz_aci=0.25):
+    s_ = siniflandir(m, duz_tol, delikler, duz_aci)
+    V, duvar, lab, duzlem, serbest = s_["V"], s_["duvar"], s_["lab"], s_["duzlem"], s_["serbest"]
+    duzlemler, silindirler = s_["duzlemler"], s_["silindirler"]
+    F = np.asarray(m.faces)
+    FN = m.face_normals
+    nf = len(F)
+    adj = m.face_adjacency
+    ae = np.sort(m.face_adjacency_edges, 1)
+    ang = np.degrees(m.face_adjacency_angles)
+    alan = m.area_faces
 
     agiz = set()
     keskin = set()
